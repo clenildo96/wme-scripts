@@ -15,7 +15,7 @@ Userscript para o **Waze Map Editor (WME)** que consulta e plota **postos de com
 ## 🚀 Instalação
 
 1. Instale o **Tampermonkey** no seu navegador (Chrome, Edge, Firefox, etc.)
-2. **[Clique aqui para instalar o script](https://raw.githubusercontent.com/clenildo96/wme-scripts/main/wme-postos-anp/postos-anp.user.js)**
+2. **[Clique aqui para instalar o script](https://raw.githubusercontent.com/clenildo96/wme-scripts/main/WME%20Postos%20ANP/WME-Postos-ANP.user.js)**
 3. Confirme a instalação na tela que abrir
 4. Abra o **Waze Map Editor** e procure a aba **⛽ ANP** na barra lateral
 
