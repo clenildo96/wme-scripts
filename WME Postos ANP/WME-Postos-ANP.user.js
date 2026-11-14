@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WME Postos ANP
 // @namespace    WMEANP
-// @version      1.2
-// @description  Postos de Combustíveis ANP no WME com paginação automática, card arrastável e detalhes
+// @version      1.3
+// @description  Postos de Combustíveis ANP no WME com paginação automática, card arrastável e relatório de postos sem georreferenciamento
 // @author       Clenildo
 // @match        https://www.waze.com/*/editor*
 // @match        https://beta.waze.com/*/editor*
@@ -38,6 +38,7 @@
        ============================================================ */
     let sdk = null;
     let postos = [];
+    let postosSemCoordenadas = [];   // NOVO: postos sem lat/lon
     let camadaCriada = false;
     let checkboxCriado = false;
     let cache = {};
@@ -84,7 +85,7 @@
         criarCamada();
         criarLayerSwitcher();
         configurarEventosSDK();
-        log('WME Postos ANP 1.2 pronto.');
+        log('WME Postos ANP 1.3 pronto.');
     }
 
     /* ============================================================
@@ -103,7 +104,7 @@
                 <div class="anp-container">
                     <div class="anp-header">
                         <div class="anp-title"><span>⛽</span> POSTOS ANP</div>
-                        <div class="anp-version">1.2</div>
+                        <div class="anp-version">1.3</div>
                     </div>
 
                     <div class="anp-form">
@@ -149,6 +150,41 @@
 
                     <div id="anpStatus" class="anp-status">Selecione uma UF e clique em Buscar.</div>
 
+                    <!-- NOVO: RELATÓRIO -->
+                    <div id="anpRelatorio" class="anp-relatorio" style="display:none;">
+                        <div class="anp-relatorio-titulo">📊 RELATÓRIO DA BUSCA</div>
+                        <div class="anp-relatorio-grid">
+                            <div class="anp-relatorio-item">
+                                <b id="anpTotal">0</b>
+                                <span>TOTAL</span>
+                            </div>
+                            <div class="anp-relatorio-item verde">
+                                <b id="anpGeo">0</b>
+                                <span>GEORREF.</span>
+                            </div>
+                            <div class="anp-relatorio-item amarelo">
+                                <b id="anpSemGeo">0</b>
+                                <span>SEM GEO.</span>
+                            </div>
+                            <div class="anp-relatorio-item azul">
+                                <b id="anpCobertura">0%</b>
+                                <span>COBERTURA</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- NOVO: LISTA DE POSTOS SEM COORDENADAS -->
+                    <div id="anpSemCoordSection" class="anp-semcoord-section" style="display:none;">
+                        <div id="anpSemCoordHeader" class="anp-semcoord-header">
+                            <span>📍 POSTOS SEM GEORREFERENCIAMENTO (<span id="anpSemCoordCount">0</span>)</span>
+                            <span id="anpSemCoordToggle" class="anp-semcoord-toggle">▼</span>
+                        </div>
+                        <div id="anpSemCoordBody" class="anp-semcoord-body" style="display:none;">
+                            <button id="btnCopiarTodos" class="anp-btn copiar-todos">📋 COPIAR TODOS OS ENDEREÇOS</button>
+                            <div id="anpSemCoordList" class="anp-semcoord-list"></div>
+                        </div>
+                    </div>
+
                     <div class="anp-ajuda">
                         <b>💡 Dica</b><br>
                         Clique em um ponto no mapa para ver os detalhes do posto.<br>
@@ -162,6 +198,14 @@
                 const btnLimpar = document.getElementById('btnLimparAnp');
                 if (btnBuscar) btnBuscar.addEventListener('click', buscarPostos);
                 if (btnLimpar) btnLimpar.addEventListener('click', () => limparMapa(true));
+
+                // NOVO: toggle da lista de sem coordenadas
+                const header = document.getElementById('anpSemCoordHeader');
+                if (header) header.addEventListener('click', toggleSemCoord);
+
+                // NOVO: copiar todos
+                const btnCopiarTodos = document.getElementById('btnCopiarTodos');
+                if (btnCopiarTodos) btnCopiarTodos.addEventListener('click', copiarTodosEnderecos);
             }, 300);
 
             log('Aba ANP registrada no Sidebar.');
@@ -540,6 +584,9 @@
         setStatus('Buscando postos na ANP...', '#007BFF');
         limparMapa(false);
 
+        // NOVO: limpar relatório anterior
+        limparRelatorio();
+
         let baseUrl = `${API_BASE}?uf=${encodeURIComponent(uf)}`;
         if (municipio) {
             baseUrl += `&municipio=${encodeURIComponent(municipio)}`;
@@ -577,7 +624,9 @@
 
             const total = processarLista(todos);
             desenharPontos();
-            setStatus(`✅ ${total} postos encontrados em ${uf}${municipio ? ' / ' + municipio : ''}. Clique em um ponto.`, 'green');
+            atualizarRelatorio(todos.length);
+            renderizarListaSemCoordenadas();
+            setStatus(`✅ ${total} postos georreferenciados + ${postosSemCoordenadas.length} sem coordenadas. Clique em um ponto.`, 'green');
 
         } catch (err) {
             logErro(err);
@@ -592,12 +641,14 @@
             try { sdk.Map.removeAllFeaturesFromLayer({ layerName: LAYER_NAME }); } catch (e) {}
         }
         postos = [];
+        postosSemCoordenadas = [];
         fecharCard();
+        limparRelatorio();
         if (showStatus !== false) setStatus('Mapa limpo.', '#555');
     }
 
     /* ============================================================
-       PROCESSAMENTO
+       PROCESSAMENTO — ALTERADO
        ============================================================ */
     function processarLista(lista) {
         if (!lista || !lista.length) return 0;
@@ -605,14 +656,23 @@
         let total = 0;
 
         lista.forEach(item => {
-            const lat = parseFloat(item.latitude);
-            const lon = parseFloat(item.longitude);
+            // 🔥 Validação robusta de coordenadas
+            const latRaw = item.latitude;
+            const lonRaw = item.longitude;
 
-            if (isNaN(lat) || isNaN(lon)) return;
+            const lat = (latRaw !== null && latRaw !== undefined && String(latRaw).trim() !== '')
+                ? parseFloat(latRaw) : NaN;
+            const lon = (lonRaw !== null && lonRaw !== undefined && String(lonRaw).trim() !== '')
+                ? parseFloat(lonRaw) : NaN;
 
-            postos.push({
-                id:          'anp-' + (item.cnpj || item.codigoSIMP || (postos.length + 1)),
-                numero:      postos.length + 1,
+            const coordenadaValida =
+                !isNaN(lat) && !isNaN(lon) &&
+                lat >= -90 && lat <= 90 &&
+                lon >= -180 && lon <= 180;
+
+            const postoBase = {
+                id:          'anp-' + (item.cnpj || item.codigoSIMP || (Date.now() + '_' + Math.random())),
+                numero:      0, // será definido abaixo
                 razaoSocial: item.razaoSocial || '',
                 cnpj:        item.cnpj || '',
                 autorizacao: item.autorizacao || '',
@@ -626,13 +686,22 @@
                 classe:      item.classe || '',
                 statusSIGAF: item.statusSIGAF || '',
                 produtos:    item.produtos || [],
-                latitude:    lat,
-                longitude:   lon
-            });
-            total++;
+                latitude:    coordenadaValida ? lat : null,
+                longitude:   coordenadaValida ? lon : null
+            };
+
+            if (coordenadaValida) {
+                postoBase.numero = postos.length + 1;
+                postos.push(postoBase);
+                total++;
+            } else {
+                // NOVO: guardar no array separado
+                postosSemCoordenadas.push(postoBase);
+            }
         });
 
-        log('Postos processados:', total);
+        log('Postos georreferenciados:', postos.length);
+        log('Postos sem coordenadas:', postosSemCoordenadas.length);
         return total;
     }
 
@@ -665,6 +734,186 @@
     }
 
     /* ============================================================
+       NOVO: RELATÓRIO
+       ============================================================ */
+    function atualizarRelatorio(totalRecebidos) {
+        const rel = document.getElementById('anpRelatorio');
+        if (!rel) return;
+
+        const totalGeo = postos.length;
+        const totalSem = postosSemCoordenadas.length;
+        const total = totalRecebidos || (totalGeo + totalSem);
+        const cobertura = total > 0 ? Math.round((totalGeo / total) * 100) : 0;
+
+        const elTotal = document.getElementById('anpTotal');
+        const elGeo = document.getElementById('anpGeo');
+        const elSem = document.getElementById('anpSemGeo');
+        const elCob = document.getElementById('anpCobertura');
+
+        if (elTotal) elTotal.textContent = total;
+        if (elGeo) elGeo.textContent = totalGeo;
+        if (elSem) elSem.textContent = totalSem;
+        if (elCob) elCob.textContent = cobertura + '%';
+
+        rel.style.display = 'block';
+
+        // Mostrar/ocultar seção de sem coordenadas
+        const section = document.getElementById('anpSemCoordSection');
+        const count = document.getElementById('anpSemCoordCount');
+        if (section) {
+            section.style.display = totalSem > 0 ? 'block' : 'none';
+        }
+        if (count) {
+            count.textContent = totalSem;
+        }
+    }
+
+    function limparRelatorio() {
+        const rel = document.getElementById('anpRelatorio');
+        if (rel) rel.style.display = 'none';
+
+        const section = document.getElementById('anpSemCoordSection');
+        if (section) section.style.display = 'none';
+
+        const list = document.getElementById('anpSemCoordList');
+        if (list) list.innerHTML = '';
+
+        const count = document.getElementById('anpSemCoordCount');
+        if (count) count.textContent = '0';
+    }
+
+    /* ============================================================
+       NOVO: LISTA DE POSTOS SEM COORDENADAS
+       ============================================================ */
+    function toggleSemCoord() {
+        const body = document.getElementById('anpSemCoordBody');
+        const toggle = document.getElementById('anpSemCoordToggle');
+        if (!body) return;
+
+        const visivel = body.style.display !== 'none';
+        body.style.display = visivel ? 'none' : 'block';
+        if (toggle) toggle.textContent = visivel ? '▼' : '▲';
+    }
+
+    function renderizarListaSemCoordenadas() {
+        const list = document.getElementById('anpSemCoordList');
+        if (!list) return;
+
+        if (!postosSemCoordenadas.length) {
+            list.innerHTML = '<div class="anp-semcoord-empty">Nenhum posto sem coordenadas.</div>';
+            return;
+        }
+
+        list.innerHTML = postosSemCoordenadas.map((p, idx) => {
+            const enderecoFormatado = formatarEndereco(p);
+            return `
+                <div class="anp-semcoord-card" data-idx="${idx}">
+                    <div class="anp-semcoord-razao">${escapeHTML(p.razaoSocial || '—')}</div>
+                    <div class="anp-semcoord-endereco">${escapeHTML(enderecoFormatado)}</div>
+                    <div class="anp-semcoord-meta">
+                        <span>${escapeHTML(p.municipio || '—')} / ${escapeHTML(p.uf || '—')}</span>
+                        <span>CEP: ${escapeHTML(p.cep || '—')}</span>
+                    </div>
+                    <div class="anp-semcoord-cnpj">CNPJ: ${escapeHTML(formatarCNPJ(p.cnpj) || '—')}</div>
+                    <button class="anp-btn copiar-endereco" data-idx="${idx}">📋 COPIAR ENDEREÇO</button>
+                </div>
+            `;
+        }).join('');
+
+        // Bind dos botões de copiar
+        list.querySelectorAll('.copiar-endereco').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = Number(btn.dataset.idx);
+                const posto = postosSemCoordenadas[idx];
+                if (!posto) return;
+                copiarTexto(formatarEndereco(posto), btn);
+            });
+        });
+    }
+
+    function formatarEndereco(p) {
+        if (!p) return '';
+        const partes = [
+            p.endereco,
+            p.complemento,
+            p.bairro,
+            p.municipio,
+            p.uf
+        ]
+            .map(v => (v || '').trim())
+            .filter(v => v && v !== 'null' && v !== 'undefined');
+
+        // Remove duplicados consecutivos
+        const unicos = [];
+        partes.forEach(v => {
+            if (!unicos.length || unicos[unicos.length - 1].toLowerCase() !== v.toLowerCase()) {
+                unicos.push(v);
+            }
+        });
+
+        return unicos.join(', ');
+    }
+
+    async function copiarTodosEnderecos() {
+        if (!postosSemCoordenadas.length) return;
+
+        const texto = postosSemCoordenadas
+            .map(p => formatarEndereco(p))
+            .filter(Boolean)
+            .join('\n');
+
+        const btn = document.getElementById('btnCopiarTodos');
+        await copiarTexto(texto, btn);
+    }
+
+    async function copiarTexto(texto, botao) {
+        if (!texto) return;
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(texto);
+            } else {
+                // Fallback: textarea + execCommand
+                const ta = document.createElement('textarea');
+                ta.value = texto;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+
+            if (botao) {
+                const original = botao.textContent;
+                botao.textContent = '✅ COPIADO!';
+                botao.classList.add('copiado');
+                setTimeout(() => {
+                    botao.textContent = original;
+                    botao.classList.remove('copiado');
+                }, 1500);
+            }
+        } catch (err) {
+            logErro('Erro ao copiar:', err);
+            if (botao) {
+                const original = botao.textContent;
+                botao.textContent = '❌ ERRO';
+                setTimeout(() => { botao.textContent = original; }, 1500);
+            }
+        }
+    }
+
+    function escapeHTML(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    /* ============================================================
        CSS
        ============================================================ */
     function criarCSS() {
@@ -686,95 +935,53 @@
             .anp-status { margin-top: 8px; padding: 7px 8px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; color: #616161; font-size: 10px; text-align: center; }
             .anp-ajuda { margin-top: 8px; padding: 7px; border: 1px solid #ffe0a3; border-radius: 6px; background: #fff8e1; color: #6d4c41; font-size: 9px; line-height: 1.45; }
 
-            #anp-card {
-                position: fixed;
-                z-index: 999999;
-                display: none;
-                max-width: calc(100vw - 20px);
-                pointer-events: auto;
-                font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
-                font-size: 12px;
-                color: #333;
-            }
+            /* RELATÓRIO */
+            .anp-relatorio { margin-top: 10px; padding: 8px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; }
+            .anp-relatorio-titulo { font-size: 10px; font-weight: 700; color: #37474f; margin-bottom: 6px; text-align: center; }
+            .anp-relatorio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+            .anp-relatorio-item { text-align: center; padding: 6px 2px; border-radius: 5px; background: #f5f5f5; border: 1px solid #e0e0e0; }
+            .anp-relatorio-item b { display: block; font-size: 14px; line-height: 16px; color: #263238; }
+            .anp-relatorio-item span { display: block; font-size: 7px; font-weight: 700; color: #757575; margin-top: 2px; }
+            .anp-relatorio-item.verde { background: #e8f5e9; border-color: #c8e6c9; }
+            .anp-relatorio-item.verde b { color: #2e7d32; }
+            .anp-relatorio-item.amarelo { background: #fff8e1; border-color: #ffe082; }
+            .anp-relatorio-item.amarelo b { color: #e65100; }
+            .anp-relatorio-item.azul { background: #e3f2fd; border-color: #bbdefb; }
+            .anp-relatorio-item.azul b { color: #1565c0; }
 
-            #anp-card .anp-card-wrapper {
-                padding: 1px;
-                border-radius: 12px;
-                background: #fff;
-                box-shadow: 0 3px 14px rgba(0,0,0,.4);
-                overflow: hidden;
-            }
+            /* LISTA DE SEM COORDENADAS */
+            .anp-semcoord-section { margin-top: 10px; border: 1px solid #ffe082; border-radius: 8px; background: #fff8e1; overflow: hidden; }
+            .anp-semcoord-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: linear-gradient(135deg, #FF9800, #E65100); color: #fff; cursor: pointer; font-size: 10px; font-weight: 700; user-select: none; }
+            .anp-semcoord-header:hover { filter: brightness(1.05); }
+            .anp-semcoord-toggle { font-size: 11px; }
+            .anp-semcoord-body { padding: 8px; }
+            .anp-semcoord-list { max-height: 320px; overflow-y: auto; margin-top: 6px; }
+            .anp-semcoord-card { padding: 7px; margin-bottom: 6px; border: 1px solid #ffe0b2; border-radius: 6px; background: #fff; font-size: 10px; }
+            .anp-semcoord-card:last-child { margin-bottom: 0; }
+            .anp-semcoord-razao { font-weight: 700; color: #263238; margin-bottom: 3px; }
+            .anp-semcoord-endereco { color: #424242; margin-bottom: 4px; line-height: 1.3; word-break: break-word; }
+            .anp-semcoord-meta { display: flex; justify-content: space-between; font-size: 9px; color: #757575; margin-bottom: 3px; }
+            .anp-semcoord-cnpj { font-size: 9px; color: #757575; margin-bottom: 5px; }
+            .anp-semcoord-empty { text-align: center; padding: 15px; color: #9e9e9e; font-size: 10px; }
+            .anp-btn.copiar-todos { background: #FF9800; color: #fff; font-size: 9px; padding: 7px; margin-bottom: 6px; }
+            .anp-btn.copiar-endereco { background: #fff; color: #E65100; border: 1px solid #FF9800; font-size: 9px; padding: 5px; margin-bottom: 0; }
+            .anp-btn.copiado { background: #2e7d32 !important; color: #fff !important; border-color: #2e7d32 !important; }
 
-            #anp-card .anp-card-drag-handle {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 6px;
-                padding: 6px 10px;
-                background: linear-gradient(135deg, #E65100, #BF360C);
-                color: #fff;
-                font-size: 10px;
-                font-weight: 700;
-                cursor: grab;
-                user-select: none;
-                transition: filter .15s;
-            }
+            /* CARD FLUTUANTE */
+            #anp-card { position: fixed; z-index: 999999; display: none; max-width: calc(100vw - 20px); pointer-events: auto; font-family: "Helvetica Neue", Arial, Helvetica, sans-serif; font-size: 12px; color: #333; }
+            #anp-card .anp-card-wrapper { padding: 1px; border-radius: 12px; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.4); overflow: hidden; }
+            #anp-card .anp-card-drag-handle { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 10px; background: linear-gradient(135deg, #E65100, #BF360C); color: #fff; font-size: 10px; font-weight: 700; cursor: grab; user-select: none; transition: filter .15s; }
             #anp-card .anp-card-drag-handle:hover { filter: brightness(1.1); }
             #anp-card .anp-card-drag-handle:active { cursor: grabbing; }
-            #anp-card .anp-card-drag-dots {
-                font-size: 14px;
-                opacity: .85;
-                letter-spacing: -2px;
-            }
-            #anp-card .anp-card-drag-label {
-                opacity: .9;
-                text-transform: uppercase;
-                letter-spacing: .5px;
-            }
-
-            #anp-card .anp-card-content {
-                margin: 13px 19px;
-                line-height: 1.4;
-                width: 290px;
-                max-width: 80vw;
-                max-height: 60vh;
-                overflow-y: auto;
-            }
-
-            #anp-card .anp-card-title {
-                text-align: center;
-                font-weight: bold;
-                margin-bottom: 12px;
-                font-size: 13px;
-            }
-
+            #anp-card .anp-card-drag-dots { font-size: 14px; opacity: .85; letter-spacing: -2px; }
+            #anp-card .anp-card-drag-label { opacity: .9; text-transform: uppercase; letter-spacing: .5px; }
+            #anp-card .anp-card-content { margin: 13px 19px; line-height: 1.4; width: 290px; max-width: 80vw; max-height: 60vh; overflow-y: auto; }
+            #anp-card .anp-card-title { text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 13px; }
             #anp-card .anp-card-row { display: flex; margin-bottom: 4px; }
             #anp-card .anp-card-label { width: 41.66%; text-align: right; padding-right: 5px; color: #555; flex-shrink: 0; }
             #anp-card .anp-card-value { width: 58.33%; text-align: left; font-weight: bold; color: #000; word-break: break-word; }
-
-            #anp-card .anp-card-tip {
-                position: absolute;
-                left: 50%; margin-left: -8px;
-                bottom: -8px;
-                width: 16px; height: 16px;
-                transform: rotate(45deg);
-                background: #fff;
-                box-shadow: 0 3px 14px rgba(0,0,0,.4);
-                pointer-events: none;
-            }
-
-            #anp-card .anp-card-close {
-                position: absolute;
-                top: 0; right: 0;
-                padding: 4px 8px;
-                color: #ffffff;
-                text-decoration: none;
-                font: bold 16px/14px Tahoma, Verdana, sans-serif;
-                cursor: pointer;
-                z-index: 2;
-                opacity: .8;
-                transition: opacity .15s;
-            }
+            #anp-card .anp-card-tip { position: absolute; left: 50%; margin-left: -8px; bottom: -8px; width: 16px; height: 16px; transform: rotate(45deg); background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.4); pointer-events: none; }
+            #anp-card .anp-card-close { position: absolute; top: 0; right: 0; padding: 4px 8px; color: #ffffff; text-decoration: none; font: bold 16px/14px Tahoma, Verdana, sans-serif; cursor: pointer; z-index: 2; opacity: .8; transition: opacity .15s; }
             #anp-card .anp-card-close:hover { opacity: 1; }
         `;
         document.head.appendChild(style);
