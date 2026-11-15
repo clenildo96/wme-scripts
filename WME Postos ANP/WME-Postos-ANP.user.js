@@ -20,7 +20,7 @@
     'use strict';
 
     /* ============================================================
-       CONFIGURACAO
+       CONFIGURACAO 
        ============================================================ */
     const SCRIPT_ID   = 'wme-anp-postos';
     const SCRIPT_NAME = 'WME Postos ANP';
