@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Postos ANP
 // @namespace    WMEANP
-// @version      1.3.2
+// @version      1.3.3
 // @description  Integra os dados oficiais de postos revendedores da ANP ao Waze Map Editor (WME), com painel arrastável, visualização de postos e relatório de estabelecimentos sem georreferenciamento.
 // @author       Clenildo
 // @license      MIT
@@ -29,6 +29,11 @@
     const SCRIPT_NAME = 'WME Postos ANP';
     const LAYER_NAME  = 'anp-postos-pontos';
     const LAYER_CHECKBOX_NAME = 'ANP — Postos de Combustíveis';
+
+    /* Versão dinâmica, lida do próprio userscript (GM_info) */
+    const VERSAO_SCRIPT = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version)
+        ? GM_info.script.version
+        : 'dev';
 
     const COR = '#E65100';
     const API_BASE = 'https://revendedoresapi.anp.gov.br/v1/combustivel';
@@ -87,7 +92,7 @@
         criarCamada();
         criarLayerSwitcher();
         configurarEventosSDK();
-        log('WME Postos ANP 1.4 pronto.');
+        log('WME Postos ANP ' + VERSAO_SCRIPT + ' pronto.');
     }
 
     /* ============================================================
@@ -106,7 +111,7 @@
                 <div class="anp-container">
                     <div class="anp-header">
                         <div class="anp-title"><span>⛽</span> POSTOS ANP</div>
-                        <div class="anp-version">1.4</div>
+                        <div class="anp-version">${VERSAO_SCRIPT}</div>
                     </div>
 
                     <div class="anp-form">
