@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         WME Postos ANP
 // @namespace    WMEANP
-// @version      1.3
-// @description  Postos de Combustíveis ANP no WME com paginação automática, card arrastável e relatório de postos sem georreferenciamento
+// @version      1.3.1
+// @description  Integra os dados oficiais de postos revendedores da ANP ao Waze Map Editor (WME), com painel arrastável, visualização de postos e relatório de estabelecimentos sem georreferenciamento.
 // @author       Clenildo
+// @license      MIT
+// @homepageURL  https://github.com/clenildo96/wme-scripts
+// @supportURL   https://github.com/clenildo96/wme-scripts/issues
 // @match        https://www.waze.com/*/editor*
 // @match        https://beta.waze.com/*/editor*
 // @exclude      https://www.waze.com/user/*editor/*
