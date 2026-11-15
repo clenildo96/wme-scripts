@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Postos ANP
 // @namespace    WMEANP
-// @version      1.3.1
+// @version      1.3.2
 // @description  Integra os dados oficiais de postos revendedores da ANP ao Waze Map Editor (WME), com painel arrastável, visualização de postos e relatório de estabelecimentos sem georreferenciamento.
 // @author       Clenildo
 // @license      MIT
@@ -23,7 +23,7 @@
     'use strict';
 
     /* ============================================================
-       CONFIGURACAO 
+       CONFIGURACAO
        ============================================================ */
     const SCRIPT_ID   = 'wme-anp-postos';
     const SCRIPT_NAME = 'WME Postos ANP';
@@ -41,7 +41,7 @@
        ============================================================ */
     let sdk = null;
     let postos = [];
-    let postosSemCoordenadas = [];   // NOVO: postos sem lat/lon
+    let postosSemCoordenadas = [];
     let camadaCriada = false;
     let checkboxCriado = false;
     let cache = {};
@@ -49,7 +49,6 @@
     let cardEl = null;
     let cardPostoId = null;
 
-    /* Estado do arraste */
     let cardArrastando = false;
     let cardPosicaoManual = false;
     let cardDragOffsetX = 0;
@@ -88,7 +87,7 @@
         criarCamada();
         criarLayerSwitcher();
         configurarEventosSDK();
-        log('WME Postos ANP 1.3 pronto.');
+        log('WME Postos ANP 1.4 pronto.');
     }
 
     /* ============================================================
@@ -107,7 +106,7 @@
                 <div class="anp-container">
                     <div class="anp-header">
                         <div class="anp-title"><span>⛽</span> POSTOS ANP</div>
-                        <div class="anp-version">1.3</div>
+                        <div class="anp-version">1.4</div>
                     </div>
 
                     <div class="anp-form">
@@ -153,7 +152,6 @@
 
                     <div id="anpStatus" class="anp-status">Selecione uma UF e clique em Buscar.</div>
 
-                    <!-- NOVO: RELATÓRIO -->
                     <div id="anpRelatorio" class="anp-relatorio" style="display:none;">
                         <div class="anp-relatorio-titulo">📊 RELATÓRIO DA BUSCA</div>
                         <div class="anp-relatorio-grid">
@@ -176,14 +174,12 @@
                         </div>
                     </div>
 
-                    <!-- NOVO: LISTA DE POSTOS SEM COORDENADAS -->
                     <div id="anpSemCoordSection" class="anp-semcoord-section" style="display:none;">
                         <div id="anpSemCoordHeader" class="anp-semcoord-header">
                             <span>📍 POSTOS SEM GEORREFERENCIAMENTO (<span id="anpSemCoordCount">0</span>)</span>
                             <span id="anpSemCoordToggle" class="anp-semcoord-toggle">▼</span>
                         </div>
                         <div id="anpSemCoordBody" class="anp-semcoord-body" style="display:none;">
-                            <button id="btnCopiarTodos" class="anp-btn copiar-todos">📋 COPIAR TODOS OS ENDEREÇOS</button>
                             <div id="anpSemCoordList" class="anp-semcoord-list"></div>
                         </div>
                     </div>
@@ -202,13 +198,8 @@
                 if (btnBuscar) btnBuscar.addEventListener('click', buscarPostos);
                 if (btnLimpar) btnLimpar.addEventListener('click', () => limparMapa(true));
 
-                // NOVO: toggle da lista de sem coordenadas
                 const header = document.getElementById('anpSemCoordHeader');
                 if (header) header.addEventListener('click', toggleSemCoord);
-
-                // NOVO: copiar todos
-                const btnCopiarTodos = document.getElementById('btnCopiarTodos');
-                if (btnCopiarTodos) btnCopiarTodos.addEventListener('click', copiarTodosEnderecos);
             }, 300);
 
             log('Aba ANP registrada no Sidebar.');
@@ -587,7 +578,6 @@
         setStatus('Buscando postos na ANP...', '#007BFF');
         limparMapa(false);
 
-        // NOVO: limpar relatório anterior
         limparRelatorio();
 
         let baseUrl = `${API_BASE}?uf=${encodeURIComponent(uf)}`;
@@ -651,7 +641,7 @@
     }
 
     /* ============================================================
-       PROCESSAMENTO — ALTERADO
+       PROCESSAMENTO
        ============================================================ */
     function processarLista(lista) {
         if (!lista || !lista.length) return 0;
@@ -659,7 +649,6 @@
         let total = 0;
 
         lista.forEach(item => {
-            // 🔥 Validação robusta de coordenadas
             const latRaw = item.latitude;
             const lonRaw = item.longitude;
 
@@ -675,7 +664,7 @@
 
             const postoBase = {
                 id:          'anp-' + (item.cnpj || item.codigoSIMP || (Date.now() + '_' + Math.random())),
-                numero:      0, // será definido abaixo
+                numero:      0,
                 razaoSocial: item.razaoSocial || '',
                 cnpj:        item.cnpj || '',
                 autorizacao: item.autorizacao || '',
@@ -698,7 +687,6 @@
                 postos.push(postoBase);
                 total++;
             } else {
-                // NOVO: guardar no array separado
                 postosSemCoordenadas.push(postoBase);
             }
         });
@@ -737,7 +725,7 @@
     }
 
     /* ============================================================
-       NOVO: RELATÓRIO
+       RELATÓRIO
        ============================================================ */
     function atualizarRelatorio(totalRecebidos) {
         const rel = document.getElementById('anpRelatorio');
@@ -760,7 +748,6 @@
 
         rel.style.display = 'block';
 
-        // Mostrar/ocultar seção de sem coordenadas
         const section = document.getElementById('anpSemCoordSection');
         const count = document.getElementById('anpSemCoordCount');
         if (section) {
@@ -786,7 +773,7 @@
     }
 
     /* ============================================================
-       NOVO: LISTA DE POSTOS SEM COORDENADAS
+       LISTA DE POSTOS SEM COORDENADAS
        ============================================================ */
     function toggleSemCoord() {
         const body = document.getElementById('anpSemCoordBody');
@@ -823,7 +810,6 @@
             `;
         }).join('');
 
-        // Bind dos botões de copiar
         list.querySelectorAll('.copiar-endereco').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -847,7 +833,6 @@
             .map(v => (v || '').trim())
             .filter(v => v && v !== 'null' && v !== 'undefined');
 
-        // Remove duplicados consecutivos
         const unicos = [];
         partes.forEach(v => {
             if (!unicos.length || unicos[unicos.length - 1].toLowerCase() !== v.toLowerCase()) {
@@ -858,18 +843,6 @@
         return unicos.join(', ');
     }
 
-    async function copiarTodosEnderecos() {
-        if (!postosSemCoordenadas.length) return;
-
-        const texto = postosSemCoordenadas
-            .map(p => formatarEndereco(p))
-            .filter(Boolean)
-            .join('\n');
-
-        const btn = document.getElementById('btnCopiarTodos');
-        await copiarTexto(texto, btn);
-    }
-
     async function copiarTexto(texto, botao) {
         if (!texto) return;
 
@@ -877,7 +850,6 @@
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 await navigator.clipboard.writeText(texto);
             } else {
-                // Fallback: textarea + execCommand
                 const ta = document.createElement('textarea');
                 ta.value = texto;
                 ta.style.position = 'fixed';
@@ -938,7 +910,6 @@
             .anp-status { margin-top: 8px; padding: 7px 8px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; color: #616161; font-size: 10px; text-align: center; }
             .anp-ajuda { margin-top: 8px; padding: 7px; border: 1px solid #ffe0a3; border-radius: 6px; background: #fff8e1; color: #6d4c41; font-size: 9px; line-height: 1.45; }
 
-            /* RELATÓRIO */
             .anp-relatorio { margin-top: 10px; padding: 8px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; }
             .anp-relatorio-titulo { font-size: 10px; font-weight: 700; color: #37474f; margin-bottom: 6px; text-align: center; }
             .anp-relatorio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
@@ -952,7 +923,6 @@
             .anp-relatorio-item.azul { background: #e3f2fd; border-color: #bbdefb; }
             .anp-relatorio-item.azul b { color: #1565c0; }
 
-            /* LISTA DE SEM COORDENADAS */
             .anp-semcoord-section { margin-top: 10px; border: 1px solid #ffe082; border-radius: 8px; background: #fff8e1; overflow: hidden; }
             .anp-semcoord-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: linear-gradient(135deg, #FF9800, #E65100); color: #fff; cursor: pointer; font-size: 10px; font-weight: 700; user-select: none; }
             .anp-semcoord-header:hover { filter: brightness(1.05); }
@@ -966,11 +936,9 @@
             .anp-semcoord-meta { display: flex; justify-content: space-between; font-size: 9px; color: #757575; margin-bottom: 3px; }
             .anp-semcoord-cnpj { font-size: 9px; color: #757575; margin-bottom: 5px; }
             .anp-semcoord-empty { text-align: center; padding: 15px; color: #9e9e9e; font-size: 10px; }
-            .anp-btn.copiar-todos { background: #FF9800; color: #fff; font-size: 9px; padding: 7px; margin-bottom: 6px; }
             .anp-btn.copiar-endereco { background: #fff; color: #E65100; border: 1px solid #FF9800; font-size: 9px; padding: 5px; margin-bottom: 0; }
             .anp-btn.copiado { background: #2e7d32 !important; color: #fff !important; border-color: #2e7d32 !important; }
 
-            /* CARD FLUTUANTE */
             #anp-card { position: fixed; z-index: 999999; display: none; max-width: calc(100vw - 20px); pointer-events: auto; font-family: "Helvetica Neue", Arial, Helvetica, sans-serif; font-size: 12px; color: #333; }
             #anp-card .anp-card-wrapper { padding: 1px; border-radius: 12px; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.4); overflow: hidden; }
             #anp-card .anp-card-drag-handle { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 10px; background: linear-gradient(135deg, #E65100, #BF360C); color: #fff; font-size: 10px; font-weight: 700; cursor: grab; user-select: none; transition: filter .15s; }
